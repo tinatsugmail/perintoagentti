@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Perintöverolaskuri</title>
+<style>
+  :root { --ink:#1d2327; --muted:#5f6b73; --line:#d9dee2; --bg:#f6f7f8; --card:#fff; --accent:#1f5f8b; --ok:#2e7d4f; --bad:#b3261e; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color:var(--ink); background:var(--bg); line-height:1.45; }
+  main { max-width:860px; margin:0 auto; padding:24px 16px 48px; }
+  h1 { font-size:1.6rem; margin:0 0 4px; }
+  h2 { font-size:1.1rem; margin:0 0 12px; }
+  .sub { color:var(--muted); margin:0 0 20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px; margin-bottom:16px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media (max-width:640px){ .grid { grid-template-columns:1fr; } }
+  label { display:block; font-weight:600; font-size:.92rem; margin-bottom:4px; }
+  input[type=number], select, input[type=text] { width:100%; padding:9px 10px; border:1px solid var(--line); border-radius:7px; font-size:1rem; background:#fff; color:var(--ink); }
+  .check { display:flex; gap:8px; align-items:flex-start; font-weight:400; margin-top:6px; }
+  .check input { margin-top:3px; }
+  .hint { color:var(--muted); font-size:.85rem; margin-top:4px; }
+  .result { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+  @media (max-width:640px){ .result { grid-template-columns:1fr; } }
+  .stat { border:1px solid var(--line); border-radius:8px; padding:12px; }
+  .stat .k { color:var(--muted); font-size:.85rem; }
+  .stat .v { font-size:1.35rem; font-weight:700; margin-top:2px; }
+  .stat.main .v { color:var(--accent); }
+  .steps { margin:14px 0 0; padding-left:18px; color:var(--ink); }
+  .steps li { margin:3px 0; }
+  table { width:100%; border-collapse:collapse; font-size:.9rem; }
+  th, td { text-align:left; padding:7px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; }
+  td.num, th.num { text-align:right; white-space:nowrap; }
+  .ok { color:var(--ok); font-weight:700; }
+  .bad { color:var(--bad); font-weight:700; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:7px; padding:9px 14px; font-size:.95rem; cursor:pointer; }
+  button.ghost { background:#fff; color:var(--accent); border:1px solid var(--accent); }
+  .row { display:flex; gap:10px; align-items:end; flex-wrap:wrap; }
+  .row > div { flex:1 1 200px; }
+  .score { font-size:1.1rem; font-weight:700; margin:10px 0; }
+  .note { font-size:.85rem; color:var(--muted); }
+  .x { background:none; color:var(--muted); border:0; padding:0 4px; cursor:pointer; font-size:1rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Perintöverolaskuri</h1>
+  <p class="sub">Laskee yhden perillisen perintöveron perintö- ja lahjaverolain asteikoilla. Asteikko valitaan perinnönjättäjän kuolinpäivän mukaan.</p>
+
+  <section class="card">
+    <h2>Tiedot</h2>
+    <div class="grid">
+      <div>
+        <label for="osuus">Perintöosuuden arvo (€)</label>
+        <input id="osuus" type="number" min="0" step="100" value="100000">
+        <div class="hint">Veronalainen perintöosuus velkojen ja kulujen jälkeen.</div>
+      </div>
+      <div>
+        <label for="kuolema">Perinnönjättäjän kuolinpäivä</label>
+        <select id="kuolema">
+          <option value="2026" selected>1.1.2026 tai myöhemmin</option>
+          <option value="2017">1.1.2017–31.12.2025</option>
+        </select>
+      </div>
+      <div>
+        <label for="suhde">Perillisen suhde perinnönjättäjään</label>
+        <select id="suhde">
+          <option value="lapsi">Lapsi, ottolapsi tai tämän jälkeläinen</option>
+          <option value="puoliso">Aviopuoliso</option>
+          <option value="avoI">Avopuoliso, jolla yhteinen lapsi tai aiempi avioliitto</option>
+          <option value="puolisonlapsi">Puolison lapsi tai tämän jälkeläinen</option>
+          <option value="vanhempi">Vanhempi tai isovanhempi</option>
+          <option value="sisarus">Sisarus tai sisaruksen jälkeläinen</option>
+          <option value="avoII">Muu avopuoliso (testamentilla)</option>
+          <option value="muu">Muu henkilö</option>
+        </select>
+        <div class="hint" id="luokkaHint"></div>
+      </div>
+      <div>
+        <label>Vähennykset</label>
+        <label class="check"><input type="checkbox" id="puolisoVah"> Puolisovähennys 90 000 €</label>
+        <label class="check"><input type="checkbox" id="alaikVah"> Alaikäisyysvähennys 60 000 € (alle 18-vuotias, perimysjärjestyksessä lähinnä)</label>
+        <div class="hint" id="vahHint"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Tulos</h2>
+    <div class="result">
+      <div class="stat"><div class="k">Veroluokka</div><div class="v" id="rLuokka">–</div></div>
+      <div class="stat"><div class="k">Verotettava osuus</div><div class="v" id="rVerot">–</div></div>
+      <div class="stat main"><div class="k">Perintövero</div><div class="v" id="rVero">–</div></div>
+    </div>
+    <ol class="steps" id="steps"></ol>
+  </section>
+
+  <section class="card">
+    <h2>Testiloki</h2>
+    <p class="note">Syötä sama tapaus Veronmaksajien tai Verohallinnon laskuriin ja kirjaa sen tulos tähän. Laskuri vertaa tuloksia ja laskee pisteet.</p>
+    <div class="row">
+      <div>
+        <label for="vertailu">Vertailulaskurin tulos (€)</label>
+        <input id="vertailu" type="number" min="0" step="1" placeholder="esim. 8000">
+      </div>
+      <div>
+        <label for="huom">Huomio (valinnainen)</label>
+        <input id="huom" type="text" placeholder="esim. vanha asteikko">
+      </div>
+      <div style="flex:0 0 auto"><button id="lisaa">Lisää testi</button></div>
+    </div>
+    <div class="score" id="score">Ei testejä vielä.</div>
+    <table>
+      <thead><tr><th>#</th><th>Tapaus</th><th class="num">Laskuri</th><th class="num">Vertailu</th><th>Tulos</th><th>Huomio</th><th></th></tr></thead>
+      <tbody id="loki"></tbody>
+    </table>
+    <div class="row" style="margin-top:12px">
+      <div style="flex:0 0 auto"><button class="ghost" id="kopioi">Kopioi taulukko</button></div>
+      <div class="note" id="kopioiMsg"></div>
+    </div>
+  </section>
+
+  <p class="note">Laskuri ei ota huomioon hallintaoikeusvähennystä, henkivakuutuskorvauksia, sukupolvenvaihdoshuojennusta eikä ositusta. Perintöosuus ja veroluokka on selvitettävä ennen laskemista. Asteikot: perintö- ja lahjaverolaki 14 §; vähennykset 12 §.</p>
+</main>
+
+<script>
+const ASTEIKOT = {
+  "2026": {
+    I:  [[30000,100,7],[40000,800,10],[60000,2800,13],[200000,21000,16],[1000000,149000,19]],
+    II: [[30000,100,19],[40000,2000,25],[60000,7000,29],[200000,47600,31],[1000000,295600,33]]
+  },
+  "2017": {
+    I:  [[20000,100,7],[40000,1500,10],[60000,3500,13],[200000,21700,16],[1000000,149700,19]],
+    II: [[20000,100,19],[40000,3900,25],[60000,8900,29],[200000,49500,31],[1000000,297500,33]]
+  }
+};
+const LUOKKA = { lapsi:"I", puoliso:"I", avoI:"I", puolisonlapsi:"I", vanhempi:"I", sisarus:"II", avoII:"II", muu:"II" };
+const SUHDE_TXT = {
+  lapsi:"Lapsi/jälkeläinen", puoliso:"Aviopuoliso", avoI:"Avopuoliso (I lk)", puolisonlapsi:"Puolison lapsi",
+  vanhempi:"Vanhempi/isovanhempi", sisarus:"Sisarus/jälkeläinen", avoII:"Avopuoliso (II lk)", muu:"Muu"
+};
+const $ = id => document.getElementById(id);
+const eur = n => n.toLocaleString("fi-FI", { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 }) + " €";
+const tests = [];
+let current = null;
+
+function vero(verot, asteikko) {
+  if (verot < asteikko[0][0]) return { vero: 0, rivi: null };
+  let rivi = asteikko[0];
+  for (const r of asteikko) if (verot >= r[0]) rivi = r;
+  const v = rivi[1] + (verot - rivi[0]) * rivi[2] / 100;
+  return { vero: Math.round(v * 100) / 100, rivi };
+}
+
+function paivitaVahennykset() {
+  const s = $("suhde").value;
+  const puolisoOk = s === "puoliso" || s === "avoI";
+  const alaikOk = s === "lapsi";
+  $("puolisoVah").disabled = !puolisoOk;
+  $("alaikVah").disabled = !alaikOk;
+  if (!puolisoOk) $("puolisoVah").checked = false;
+  if (!alaikOk) $("alaikVah").checked = false;
+  if (puolisoOk && !$("puolisoVah").dataset.touched) $("puolisoVah").checked = true;
+  $("vahHint").textContent = puolisoOk ? "Puolisovähennys koskee aviopuolisoa ja I luokan avopuolisoa."
+    : alaikOk ? "Alaikäisyysvähennys koskee suoraan alenevassa polvessa olevaa alaikäistä perillistä."
+    : "Valitulle perilliselle ei kuulu puoliso- tai alaikäisyysvähennystä.";
+}
+
+function laske() {
+  const osuus = Math.max(0, Number($("osuus").value) || 0);
+  const vuosi = $("kuolema").value;
+  const s = $("suhde").value;
+  const luokka = LUOKKA[s];
+  let vah = 0;
+  const steps = [];
+  steps.push(`Perintöosuus ${eur(osuus)}.`);
+  steps.push(`${SUHDE_TXT[s]} kuuluu ${luokka} veroluokkaan. Asteikko: kuolema ${vuosi === "2026" ? "1.1.2026 tai myöhemmin" : "1.1.2017–31.12.2025"}.`);
+  if ($("puolisoVah").checked) { vah += 90000; steps.push("Puolisovähennys −90 000 €."); }
+  if ($("alaikVah").checked) { vah += 60000; steps.push("Alaikäisyysvähennys −60 000 €."); }
+  const verot = Math.floor(Math.max(0, osuus - vah) / 100) * 100; // PerVL 31 § 3 mom
+  steps.push(`Verotettava osuus pyöristettynä alaspäin täysiin satoihin euroihin (PerVL 31 § 3 mom.): ${eur(verot)}.`);
+  const ast = ASTEIKOT[vuosi][luokka];
+  const r = vero(verot, ast);
+  if (!r.rivi) {
+    steps.push(`Verotettava osuus on alle ${eur(ast[0][0])}, joten veroa ei makseta.`);
+  } else {
+    steps.push(`Portaan ${eur(r.rivi[0])} vakioerä ${eur(r.rivi[1])} + ${r.rivi[2]} % ylittävästä osasta ${eur(verot - r.rivi[0])} = ${eur(r.vero)}.`);
+  }
+  $("luokkaHint").textContent = `Veroluokka ${luokka}`;
+  $("rLuokka").textContent = luokka;
+  $("rVerot").textContent = eur(verot);
+  $("rVero").textContent = eur(r.vero);
+  $("steps").innerHTML = steps.map(t => `<li>${t}</li>`).join("");
+  current = { osuus, vuosi, s, luokka, vah, vero: r.vero };
+}
+
+function piirraLoki() {
+  const body = $("loki");
+  body.innerHTML = tests.map((t, i) => {
+    const ok = Math.abs(t.vero - t.vertailu) < 1;
+    return `<tr><td>${i + 1}</td><td>${eur(t.osuus)}, ${SUHDE_TXT[t.s]}, ${t.vuosi === "2026" ? "kuollut 2026–" : "kuollut –2025"}${t.vah ? ", vähennys " + eur(t.vah) : ""}</td>
+      <td class="num">${eur(t.vero)}</td><td class="num">${eur(t.vertailu)}</td>
+      <td class="${ok ? "ok" : "bad"}">${ok ? "Oikein" : "Väärin"}</td><td>${t.huom ? t.huom.replace(/</g, "&lt;") : ""}</td>
+      <td><button class="x" data-i="${i}" title="Poista">×</button></td></tr>`;
+  }).join("");
+  const oikein = tests.filter(t => Math.abs(t.vero - t.vertailu) < 1).length;
+  $("score").textContent = tests.length ? `Pisteet: ${oikein}/${tests.length} oikein` : "Ei testejä vielä.";
+}
+
+$("lisaa").addEventListener("click", () => {
+  const v = $("vertailu").value;
+  if (v === "" || !current) { $("vertailu").focus(); return; }
+  tests.push({ ...current, vertailu: Number(v), huom: $("huom").value.trim() });
+  $("vertailu").value = ""; $("huom").value = "";
+  piirraLoki();
+});
+$("loki").addEventListener("click", e => {
+  if (e.target.dataset.i !== undefined) { tests.splice(Number(e.target.dataset.i), 1); piirraLoki(); }
+});
+$("kopioi").addEventListener("click", async () => {
+  const rows = [["#", "Osuus", "Suhde", "Kuolema", "Vähennys", "Laskuri", "Vertailu", "Tulos", "Huomio"].join("\t")];
+  tests.forEach((t, i) => rows.push([i + 1, t.osuus, SUHDE_TXT[t.s], t.vuosi === "2026" ? "2026–" : "–2025", t.vah, t.vero, t.vertailu,
+    Math.abs(t.vero - t.vertailu) < 1 ? "Oikein" : "Väärin", t.huom].join("\t")));
+  try { await navigator.clipboard.writeText(rows.join("\n")); $("kopioiMsg").textContent = "Kopioitu. Liitä taulukkolaskentaan."; }
+  catch { $("kopioiMsg").textContent = "Kopiointi estettiin tässä näkymässä."; }
+});
+$("puolisoVah").addEventListener("change", e => { e.target.dataset.touched = "1"; laske(); });
+$("alaikVah").addEventListener("change", laske);
+$("suhde").addEventListener("change", () => { $("puolisoVah").dataset.touched = ""; paivitaVahennykset(); laske(); });
+["osuus", "kuolema"].forEach(id => $(id).addEventListener("input", laske));
+paivitaVahennykset();
+laske();
+</script>
+</body>
+</html>

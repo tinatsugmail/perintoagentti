@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Perintöagentti</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<script src="laskenta.js"></script>
+<style>
+  :root { --ink:#1d2327; --muted:#5f6b73; --line:#d9dee2; --bg:#f5f6f7; --card:#fff; --accent:#1f5f8b; --soft:#eaf2f8; --warn:#8a5a00; --warnbg:#fff6e0; --bad:#b3261e; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; color:var(--ink); background:var(--bg); line-height:1.5; }
+  main { max-width:900px; margin:0 auto; padding:24px 16px 40px; }
+  h1 { font-size:1.6rem; margin:0 0 4px; }
+  .sub { color:var(--muted); margin:0 0 18px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:14px; }
+  h2 { font-size:1.05rem; margin:0 0 10px; }
+  .drop { border:2px dashed var(--line); border-radius:10px; padding:18px; text-align:center; color:var(--muted); cursor:pointer; }
+  .drop.over { border-color:var(--accent); background:var(--soft); }
+  .files { margin:10px 0 0; padding:0; list-style:none; font-size:.9rem; }
+  .files li { display:flex; justify-content:space-between; gap:8px; padding:4px 0; border-bottom:1px solid var(--line); }
+  textarea { width:100%; min-height:90px; padding:10px; border:1px solid var(--line); border-radius:8px; font:inherit; resize:vertical; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:9px 14px; font-size:.95rem; cursor:pointer; }
+  button.ghost { background:#fff; color:var(--accent); border:1px solid var(--accent); }
+  button:disabled { opacity:.5; cursor:default; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:10px; }
+  .chat { display:flex; flex-direction:column; gap:10px; }
+  .msg { padding:12px 14px; border-radius:10px; max-width:100%; white-space:normal; }
+  .msg.user { background:var(--soft); align-self:flex-end; max-width:85%; }
+  .msg.agent { background:#fff; border:1px solid var(--line); }
+  .msg.agent p { margin:0 0 8px; } .msg.agent p:last-child { margin:0; }
+  .msg.agent ul, .msg.agent ol { margin:4px 0 8px; padding-left:20px; }
+  .msg.agent table { border-collapse:collapse; margin:6px 0; font-size:.9rem; }
+  .msg.agent th, .msg.agent td { border:1px solid var(--line); padding:4px 8px; text-align:left; }
+  .tool { font-size:.82rem; color:var(--muted); border-left:3px solid var(--accent); padding:4px 10px; background:#fafbfc; }
+  .tool summary { cursor:pointer; }
+  .tool pre { white-space:pre-wrap; font-size:.78rem; margin:6px 0 0; max-height:240px; overflow:auto; }
+  .notice { background:var(--warnbg); color:var(--warn); border-radius:8px; padding:10px 12px; font-size:.9rem; }
+  .err { color:var(--bad); }
+  .composer { display:flex; gap:8px; margin-top:12px; }
+  .composer textarea { min-height:48px; }
+  .hidden { display:none; }
+  .small { font-size:.85rem; color:var(--muted); }
+  .status { font-size:.85rem; color:var(--muted); min-height:1.2em; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Perintöagentti</h1>
+  <p class="sub">Lataa perukirja ja sen liitteet. Agentti lukee asiakirjat, kysyy puuttuvat tiedot, laskee osituksen, perinnönjaon ja perintöveron laskentatyökalulla ja kertoo, milloin asia vaatii juristin.</p>
+
+  <div class="notice hidden" id="koodiLaatikko"><strong>Sivu vaatii pääsykoodin.</strong> Kysy koodi ryhmältä.
+    <div class="row"><input id="koodi" type="text" placeholder="Pääsykoodi" style="padding:8px;border:1px solid var(--line);border-radius:8px"><button id="tallennaKoodi">Jatka</button></div>
+  </div>
+
+  <section class="card" id="lataus">
+    <h2>1. Asiakirjat</h2>
+    <div class="drop" id="drop">Raahaa tiedostot tähän tai klikkaa valitaksesi (PDF, Word .docx tai teksti .txt)
+      <input type="file" id="tiedosto" multiple accept=".pdf,.docx,.txt" class="hidden">
+    </div>
+    <ul class="files" id="lista"></ul>
+    <p class="small" style="margin:10px 0 4px">Tai liitä asiakirjan teksti:</p>
+    <textarea id="liitetty" placeholder="Liitä perukirjan teksti tähän"></textarea>
+    <div class="row">
+      <button id="aloita">Aloita</button>
+      <button class="ghost" id="esimerkki">Kokeile esimerkkiperukirjalla</button>
+      <span class="status" id="latausTila"></span>
+    </div>
+    <p class="small">Käytä vain kuvitteellisia tai anonymisoituja asiakirjoja. Älä lataa henkilötunnuksia tai tilinumeroita.</p>
+  </section>
+
+  <section class="card hidden" id="keskustelu">
+    <h2>2. Agentti</h2>
+    <div class="chat" id="chat"></div>
+    <div class="status" id="tila"></div>
+    <div class="composer">
+      <textarea id="viesti" placeholder="Vastaa agentille"></textarea>
+      <button id="laheta">Lähetä</button>
+    </div>
+    <div class="row">
+      <button class="ghost" id="kopioi">Kopioi keskustelu</button>
+      <button class="ghost" id="alusta">Aloita alusta</button>
+      <span class="small" id="kopioiTila"></span>
+    </div>
+  </section>
+
+  <p class="small">Laskelma on arvio. Lopullisen perintöveron määrää Verohallinto. Lakitekstit: Finlex, ajantasainen lainsäädäntö (perintökaari 40/1965, avioliittolaki 234/1929, perintö- ja lahjaverolaki 378/1940).</p>
+</main>
+
+<script>
+const ESIMERKKI = `PERUKIRJA (kuvitteellinen esimerkki)
+
+Perittävä: Aino Esimerkki, kuollut 14.3.2026. Viimeinen asuinpaikka Turku.
+Perittävä oli kuollessaan naimisissa Pekka Esimerkin kanssa. Avioehtosopimusta ei ole tehty.
+
+Osakkaat:
+- Pekka Esimerkki, leski
+- Laura Esimerkki, tytär, s. 1985
+- Mikko Esimerkki, poika, kuollut 2022. Hänen lapsensa: Onni Esimerkki, s. 2012, ja Helmi Esimerkki, s. 2006.
+
+Perittävän varat:
+- Puolet asunto-osakkeesta, Turku: 160 000 €
+- Pankkitilit: 42 000 €
+- Rahastot: 28 000 €
+- Henkilökohtainen irtaimisto: 2 000 €
+Varat yhteensä 232 000 €
+
+Perittävän velat:
+- Osuus asuntolainasta: 30 000 €
+- Hautajaiskulut: 6 500 €
+- Perunkirjoituskulut: 1 500 €
+Velat yhteensä 38 000 €
+
+Lesken varat ja velat:
+- Puolet asunto-osakkeesta: 160 000 €
+- Pankkitilit: 15 000 €
+- Osuus asuntolainasta: 30 000 €
+
+Ennakkoperinnöt: Perittävä on antanut Lauralle 2024 rahalahjan 20 000 €, joka on määrätty ennakkoperinnöksi. Lahjasta on maksettu lahjaveroa 1 330 €.
+
+Testamentti: Perittävä ei ole tehnyt testamenttia.`;
+
+const $ = id => document.getElementById(id);
+let LAIT = null, sample = null, asiakirjat = [], historia = [], tyoskentelee = false;
+
+// Lait
+fetch("lait.json").then(r => r.json()).then(d => { LAIT = d; }).catch(() => { LAIT = []; });
+const norm = s => String(s || "").toLowerCase().replace(/\s+/g, "").replace("§", "");
+function haePykala({ laki, luku, pykala }) {
+  if (!LAIT) return { virhe: "Lakitekstit latautuvat vielä." };
+  const osumat = LAIT.filter(o => o.laki === laki && norm(o.pykala) === norm(pykala) &&
+    (!luku || o.luku.toLowerCase().startsWith(String(luku).toLowerCase().replace(/\s*luku$/, "") + " ")));
+  if (!osumat.length) return { virhe: "Pykälää ei löytynyt. Tarkista laki (PK, AL, PerVL), luku ja pykälä." };
+  return osumat.slice(0, 4).map(o => ({ laki: o.laki, luku: o.luku, pykala: o.pykala, teksti: o.teksti.slice(0, 3000) }));
+}
+function haeLaista({ laki, hakusana }) {
+  if (!LAIT) return { virhe: "Lakitekstit latautuvat vielä." };
+  const sanat = String(hakusana || "").toLowerCase().split(/\s+/).filter(Boolean);
+  const pisteet = LAIT.filter(o => !laki || o.laki === laki).map(o => {
+    const t = o.teksti.toLowerCase();
+    return { o, p: sanat.reduce((s, w) => s + (t.includes(w) ? 1 : 0), 0) };
+  }).filter(x => x.p > 0).sort((a, b) => b.p - a.p).slice(0, 5);
+  if (!pisteet.length) return { virhe: "Ei osumia." };
+  return pisteet.map(({ o }) => ({ laki: o.laki, luku: o.luku, pykala: o.pykala, teksti: o.teksti.slice(0, 1200) }));
+}
+
+const TYOKALUT = {
+  laske: (input) => { const t = input.tapaus || input; const r = Perintolaskenta.laske(t); naytaTyokalu("Laskentatyökalu", t, r); return r; },
+  hae_pykala: (input) => { const r = haePykala(input); naytaTyokalu("Pykälähaku", input, r); return r; },
+  hae_laista: (input) => { const r = haeLaista(input); naytaTyokalu("Lakihaku", input, r); return r; }
+};
+
+// Pääsykoodi
+let paasykoodi = "";
+try { paasykoodi = localStorage.getItem("paasykoodi") || ""; } catch (e) {}
+$("tallennaKoodi").addEventListener("click", () => {
+  paasykoodi = $("koodi").value.trim();
+  try { localStorage.setItem("paasykoodi", paasykoodi); } catch (e) {}
+  $("koodiLaatikko").classList.add("hidden");
+  if (historia.length) kysyAgentilta();
+});
+
+// Tiedostot
+async function lueTiedosto(f) {
+  const nimi = f.name.toLowerCase();
+  if (nimi.endsWith(".txt")) return await f.text();
+  if (nimi.endsWith(".docx")) {
+    const r = await mammoth.extractRawText({ arrayBuffer: await f.arrayBuffer() });
+    return r.value;
+  }
+  if (nimi.endsWith(".pdf")) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    const pdf = await pdfjsLib.getDocument({ data: await f.arrayBuffer() }).promise;
+    let teksti = "";
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const sivu = await pdf.getPage(i);
+      const c = await sivu.getTextContent();
+      teksti += c.items.map(x => x.str + (x.hasEOL ? "\n" : " ")).join("") + "\n";
+    }
+    if (teksti.trim().length < 30) throw new Error("PDF:ssä ei ole luettavaa tekstiä (skannattu kuva). Liitä teksti käsin.");
+    return teksti;
+  }
+  throw new Error("Tiedostomuotoa ei tueta.");
+}
+function piirraLista() {
+  $("lista").innerHTML = asiakirjat.map((a, i) =>
+    `<li><span>${esc(a.nimi)} (${a.teksti.length} merkkiä)</span><button class="ghost" data-i="${i}" style="padding:2px 8px">Poista</button></li>`).join("");
+}
+async function lisaaTiedostot(lista) {
+  for (const f of lista) {
+    $("latausTila").textContent = "Luetaan " + f.name + "…";
+    try { asiakirjat.push({ nimi: f.name, teksti: await lueTiedosto(f) }); }
+    catch (e) { $("latausTila").innerHTML = `<span class="err">${esc(f.name)}: ${esc(e.message)}</span>`; continue; }
+    $("latausTila").textContent = "";
+  }
+  piirraLista();
+}
+$("drop").addEventListener("click", () => $("tiedosto").click());
+$("tiedosto").addEventListener("change", e => lisaaTiedostot([...e.target.files]));
+$("drop").addEventListener("dragover", e => { e.preventDefault(); $("drop").classList.add("over"); });
+$("drop").addEventListener("dragleave", () => $("drop").classList.remove("over"));
+$("drop").addEventListener("drop", e => { e.preventDefault(); $("drop").classList.remove("over"); lisaaTiedostot([...e.dataTransfer.files]); });
+$("lista").addEventListener("click", e => { if (e.target.dataset.i) { asiakirjat.splice(+e.target.dataset.i, 1); piirraLista(); } });
+$("esimerkki").addEventListener("click", () => { $("liitetty").value = ESIMERKKI; });
+
+// Keskustelu
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+function md(s) {
+  const rivit = esc(s).split("\n"); let html = "", lista = null, taulu = [];
+  const inline = t => t.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/(^|[^*])\*(?!\s)(.+?)\*/g, "$1<em>$2</em>").replace(/`(.+?)`/g, "<code>$1</code>");
+  const sulje = () => { if (lista) { html += `</${lista}>`; lista = null; } if (taulu.length) { html += tauluHtml(taulu); taulu = []; } };
+  const tauluHtml = rs => { const solut = r => r.trim().replace(/^\||\|$/g, "").split("|").map(x => inline(x.trim()));
+    const data = rs.filter(r => !/^\s*\|?\s*:?-{2,}/.test(r)); if (!data.length) return "";
+    return "<table><tr>" + solut(data[0]).map(x => `<th>${x}</th>`).join("") + "</tr>" +
+      data.slice(1).map(r => "<tr>" + solut(r).map(x => `<td>${x}</td>`).join("") + "</tr>").join("") + "</table>"; };
+  for (const r of rivit) {
+    if (/^\s*\|.*\|\s*$/.test(r)) { if (lista) { html += `</${lista}>`; lista = null; } taulu.push(r); continue; }
+    if (taulu.length) { html += tauluHtml(taulu); taulu = []; }
+    let m;
+    if ((m = r.match(/^\s*[-*]\s+(.*)/))) { if (lista !== "ul") { sulje(); html += "<ul>"; lista = "ul"; } html += `<li>${inline(m[1])}</li>`; continue; }
+    if ((m = r.match(/^\s*\d+[.)]\s+(.*)/))) { if (lista !== "ol") { sulje(); html += "<ol>"; lista = "ol"; } html += `<li>${inline(m[1])}</li>`; continue; }
+    sulje();
+    if ((m = r.match(/^#{1,4}\s+(.*)/))) { html += `<p><strong>${inline(m[1])}</strong></p>`; continue; }
+    if (r.trim()) html += `<p>${inline(r)}</p>`;
+  }
+  sulje(); return html;
+}
+function lisaaViesti(rooli, teksti) {
+  const d = document.createElement("div");
+  d.className = "msg " + rooli;
+  d.innerHTML = rooli === "agent" ? md(teksti) : esc(teksti).replace(/\n/g, "<br>");
+  $("chat").appendChild(d); d.scrollIntoView({ block: "end", behavior: "smooth" });
+  return d;
+}
+let tyokaluLoki = [];
+function naytaTyokalu(nimi, syote, tulos) {
+  tyokaluLoki.push({ nimi, syote, tulos });
+  const d = document.createElement("details");
+  d.className = "tool";
+  d.innerHTML = `<summary>Agentti käytti työkalua: ${esc(nimi)}</summary><pre>Syöte:\n${esc(JSON.stringify(syote, null, 2))}\n\nTulos:\n${esc(JSON.stringify(tulos, null, 2))}</pre>`;
+  $("chat").appendChild(d);
+}
+
+async function kierros(onText) {
+  const r = await fetch("/api/claude", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-paasykoodi": paasykoodi },
+    body: JSON.stringify({ messages: historia })
+  });
+  if (!r.ok || !(r.headers.get("content-type") || "").includes("event-stream")) {
+    let viesti = "Palvelinvirhe " + r.status;
+    try { const j = await r.json(); viesti = (j.error && j.error.message) || viesti; } catch (e) {}
+    const err = new Error(viesti); err.status = r.status; throw err;
+  }
+  const lukija = r.body.getReader(), dek = new TextDecoder();
+  let puskuri = "", lohkot = [], stop = null;
+  for (;;) {
+    const { done, value } = await lukija.read();
+    if (done) break;
+    puskuri += dek.decode(value, { stream: true });
+    let i;
+    while ((i = puskuri.indexOf("\n\n")) >= 0) {
+      const tapahtuma = puskuri.slice(0, i); puskuri = puskuri.slice(i + 2);
+      const data = tapahtuma.split("\n").filter(l => l.startsWith("data:")).map(l => l.slice(5).trim()).join("");
+      if (!data) continue;
+      let e; try { e = JSON.parse(data); } catch { continue; }
+      if (e.type === "content_block_start") lohkot[e.index] = { ...e.content_block, _json: "" };
+      else if (e.type === "content_block_delta") {
+        const b = lohkot[e.index];
+        if (e.delta.type === "text_delta") { b.text = (b.text || "") + e.delta.text; onText(); }
+        else if (e.delta.type === "input_json_delta") b._json += e.delta.partial_json;
+      } else if (e.type === "content_block_stop") {
+        const b = lohkot[e.index];
+        if (b && b.type === "tool_use") { try { b.input = b._json ? JSON.parse(b._json) : {}; } catch { b.input = {}; } }
+      } else if (e.type === "message_delta") stop = e.delta.stop_reason;
+      else if (e.type === "error") throw new Error(e.error && e.error.message || "Rajapintavirhe");
+    }
+  }
+  const sisalto = lohkot.filter(Boolean).map(b => b.type === "text" ? { type: "text", text: b.text || "" }
+    : b.type === "tool_use" ? { type: "tool_use", id: b.id, name: b.name, input: b.input || {} } : null).filter(Boolean)
+    .filter(b => b.type !== "text" || b.text.trim());
+  return { sisalto, stop };
+}
+
+async function kysyAgentilta() {
+  tyoskentelee = true; paivitaNapit();
+  $("tila").textContent = "Agentti työskentelee…";
+  const alku = historia.length;
+  let kupla = lisaaViesti("agent", "…");
+  try {
+    for (let kierrokset = 0; kierrokset < 10; kierrokset++) {
+      let naytetty = "";
+      const { sisalto, stop } = await kierros(() => {});
+      historia.push({ role: "assistant", content: sisalto });
+      const teksti = sisalto.filter(b => b.type === "text").map(b => b.text).join("\n\n");
+      if (teksti) { kupla.innerHTML = md(teksti); $("chat").appendChild(kupla); }
+      const kutsut = sisalto.filter(b => b.type === "tool_use");
+      if (stop !== "tool_use" || !kutsut.length) break;
+      if (teksti) kupla = lisaaViesti("agent", "…"); 
+      const tulokset = kutsut.map(k => {
+        let tulos;
+        try { tulos = TYOKALUT[k.name] ? TYOKALUT[k.name](k.input) : { virhe: "Tuntematon työkalu" }; }
+        catch (e) { tulos = { virhe: String(e.message || e) }; }
+        return { type: "tool_result", tool_use_id: k.id, content: JSON.stringify(tulos).slice(0, 20000) };
+      });
+      $("chat").appendChild(kupla);
+      historia.push({ role: "user", content: tulokset });
+    }
+    if (kupla.textContent === "…") kupla.remove();
+    $("tila").textContent = "";
+  } catch (e) {
+    if (kupla.textContent === "…") kupla.remove();
+    historia.length = alku;
+    if (e.status === 401) { $("koodiLaatikko").classList.remove("hidden"); $("tila").textContent = ""; }
+    else $("tila").innerHTML = `<span class="err">${esc("Virhe: " + (e.message || e))}</span>`;
+  }
+  tyoskentelee = false; paivitaNapit();
+}
+function paivitaNapit() { $("laheta").disabled = tyoskentelee; $("aloita").disabled = tyoskentelee; }
+
+$("aloita").addEventListener("click", () => {
+  const liitetty = $("liitetty").value.trim();
+  const kaikki = [...asiakirjat];
+  if (liitetty) kaikki.push({ nimi: "Liitetty teksti", teksti: liitetty });
+  if (!kaikki.length) { $("latausTila").innerHTML = '<span class="err">Lisää ensin asiakirja tai liitä teksti.</span>'; return; }
+  const dokut = kaikki.map(a => `=== ASIAKIRJA: ${a.nimi} ===\n${a.teksti}`).join("\n\n");
+  historia = [{ role: "user", content: `Käyttäjän asiakirjat:\n\n${dokut}\n\nAloita työvaihe 1.` }];
+  $("chat").innerHTML = "";
+  lisaaViesti("user", `Ladattu ${kaikki.length} asiakirja${kaikki.length > 1 ? "a" : ""}: ${kaikki.map(a => a.nimi).join(", ")}`);
+  $("keskustelu").classList.remove("hidden");
+  kysyAgentilta();
+});
+function laheta() {
+  const t = $("viesti").value.trim();
+  if (!t || tyoskentelee || !historia.length) return;
+  $("viesti").value = "";
+  lisaaViesti("user", t);
+  historia.push({ role: "user", content: t });
+  kysyAgentilta();
+}
+$("laheta").addEventListener("click", laheta);
+$("viesti").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); laheta(); } });
+$("alusta").addEventListener("click", () => { historia = []; $("chat").innerHTML = ""; $("keskustelu").classList.add("hidden"); window.scrollTo(0, 0); });
+$("kopioi").addEventListener("click", async () => {
+  const t = historia.slice(1).map(m => {
+    const c = typeof m.content === "string" ? m.content : m.content.map(b => b.type === "text" ? b.text : b.type === "tool_use" ? `[työkalu ${b.name}: ${JSON.stringify(b.input)}]` : `[tulos: ${b.content}]`).join("\n");
+    return (m.role === "user" ? "KÄYTTÄJÄ: " : "AGENTTI: ") + c; }).join("\n\n");
+  try { await navigator.clipboard.writeText(t); $("kopioiTila").textContent = "Kopioitu."; }
+  catch { $("kopioiTila").textContent = "Kopiointi estettiin."; }
+});
+</script>
+</body>
+</html>
